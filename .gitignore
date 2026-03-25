@@ -1,0 +1,12 @@
+.DS_Store
+.build/
+.swiftpm/
+*.xcodeproj/
+xcuserdata/
+DerivedData/
+Packages/
+Package.resolved
+*.gradle
+build/
+.gradle/
+local.properties
