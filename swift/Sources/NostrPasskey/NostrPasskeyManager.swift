@@ -1,6 +1,9 @@
 import AuthenticationServices
 import CryptoKit
 import Foundation
+#if canImport(UIKit)
+import UIKit
+#endif
 
 /// Creates and recovers Nostr identities using passkeys with the WebAuthn PRF extension.
 ///
@@ -30,8 +33,7 @@ import Foundation
 @MainActor @Observable
 public final class NostrPasskeyManager: NSObject,
     ASAuthorizationControllerDelegate,
-    ASAuthorizationControllerPresentationContextProviding,
-    Sendable
+    ASAuthorizationControllerPresentationContextProviding
 {
     /// The relying party identifier (your domain, e.g., "example.com").
     public let relyingPartyID: String
@@ -64,7 +66,7 @@ public final class NostrPasskeyManager: NSObject,
         credentialName: String = "Nostr Key"
     ) {
         self.relyingPartyID = relyingPartyID
-        self.prfSalt = prfSalt.data(using: .utf8)!
+        self.prfSalt = Data(prfSalt.utf8)
         self.credentialName = credentialName
     }
 
@@ -87,6 +89,18 @@ public final class NostrPasskeyManager: NSObject,
     public func authenticateAndDeriveKey() async throws -> NostrPasskeyKeypair {
         let prfKey = try await authenticateWithPasskey()
         return try deriveNostrKey(from: prfKey)
+    }
+
+    /// Derive a Nostr keypair from arbitrary 32+ bytes.
+    ///
+    /// This is the core derivation function. Useful for testing, migration, or
+    /// integrating with custom PRF implementations.
+    ///
+    /// Algorithm: `SHA-256(inputBytes) → 32-byte secp256k1 private key`
+    nonisolated public static func deriveKeypair(from inputBytes: Data) throws -> NostrPasskeyKeypair {
+        let digest = SHA256.hash(data: inputBytes)
+        let privateKeyHex = digest.compactMap { String(format: "%02x", $0) }.joined()
+        return try NostrPasskeyKeypair.fromHex(privateKeyHex)
     }
 
     // MARK: - Registration
@@ -161,17 +175,11 @@ public final class NostrPasskeyManager: NSObject,
         }
     }
 
-    // MARK: - Key Derivation
+    // MARK: - Key Derivation (private, uses SymmetricKey from PRF)
 
-    /// Derive a Nostr keypair from PRF output.
-    ///
-    /// Algorithm: SHA-256(PRF output bytes) → 32-byte secp256k1 private key
-    /// This is deterministic: same PRF output always produces the same Nostr key.
     private func deriveNostrKey(from symmetricKey: SymmetricKey) throws -> NostrPasskeyKeypair {
         let rawBytes = symmetricKey.withUnsafeBytes { Data($0) }
-        let digest = SHA256.hash(data: rawBytes)
-        let privateKeyHex = digest.compactMap { String(format: "%02x", $0) }.joined()
-        return try NostrPasskeyKeypair.fromHex(privateKeyHex)
+        return try Self.deriveKeypair(from: rawBytes)
     }
 
     // MARK: - ASAuthorizationControllerDelegate
@@ -244,12 +252,14 @@ public final class NostrPasskeyManager: NSObject,
     }
 }
 
-/// Errors from passkey operations.
+/// Errors from NostrPasskey operations.
 public enum NostrPasskeyError: Error, LocalizedError {
     case prfNotAvailable
     case prfNotSupported
     case prfOutputMissing
     case unexpectedCredentialType
+    case invalidKey(String)
+    case keyDerivationFailed(String)
     case authenticationFailed(String)
 
     public var errorDescription: String? {
@@ -258,6 +268,8 @@ public enum NostrPasskeyError: Error, LocalizedError {
         case .prfNotSupported: "Your device doesn't support passkey-based key derivation."
         case .prfOutputMissing: "Passkey authentication succeeded but key derivation failed. Please try again."
         case .unexpectedCredentialType: "Unexpected credential type. Please try again."
+        case .invalidKey(let detail): "Invalid key: \(detail)"
+        case .keyDerivationFailed(let detail): "Key derivation failed: \(detail)"
         case .authenticationFailed(let detail):
             detail.contains("cancelled") ? nil : "Authentication failed: \(detail)"
         }

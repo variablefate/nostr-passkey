@@ -5,7 +5,7 @@ import NostrSDK
 ///
 /// The private key is intentionally `internal` to discourage accidental logging or display.
 /// Use `exportNsec()` when you explicitly need the private key (e.g., for backup).
-public struct NostrPasskeyKeypair: Sendable, Equatable {
+public struct NostrPasskeyKeypair: Sendable, Equatable, Hashable {
     /// Public key in hex format (64 characters).
     public let publicKeyHex: String
 
@@ -29,22 +29,38 @@ public struct NostrPasskeyKeypair: Sendable, Equatable {
 
     /// Generate a new random keypair.
     public static func generate() throws -> NostrPasskeyKeypair {
-        let keys = Keys.generate()
-        return try from(keys: keys)
+        do {
+            let keys = Keys.generate()
+            return try from(keys: keys)
+        } catch {
+            throw NostrPasskeyError.keyDerivationFailed("Failed to generate keypair: \(error.localizedDescription)")
+        }
     }
 
     /// Import a keypair from an nsec bech32 string (e.g., "nsec1...").
     public static func fromNsec(_ nsec: String) throws -> NostrPasskeyKeypair {
-        let secretKey = try SecretKey.parse(secretKey: nsec)
-        let keys = Keys(secretKey: secretKey)
-        return try from(keys: keys)
+        do {
+            let secretKey = try SecretKey.parse(secretKey: nsec)
+            let keys = Keys(secretKey: secretKey)
+            return try from(keys: keys)
+        } catch let error as NostrPasskeyError {
+            throw error
+        } catch {
+            throw NostrPasskeyError.invalidKey("Invalid nsec format.")
+        }
     }
 
     /// Import a keypair from a hex private key (64 hex characters).
     public static func fromHex(_ hex: String) throws -> NostrPasskeyKeypair {
-        let secretKey = try SecretKey.parse(secretKey: hex)
-        let keys = Keys(secretKey: secretKey)
-        return try from(keys: keys)
+        do {
+            let secretKey = try SecretKey.parse(secretKey: hex)
+            let keys = Keys(secretKey: secretKey)
+            return try from(keys: keys)
+        } catch let error as NostrPasskeyError {
+            throw error
+        } catch {
+            throw NostrPasskeyError.invalidKey("Invalid hex private key.")
+        }
     }
 
     // MARK: - Export
@@ -58,17 +74,25 @@ public struct NostrPasskeyKeypair: Sendable, Equatable {
     // MARK: - Internal
 
     private static func from(keys: Keys) throws -> NostrPasskeyKeypair {
-        let secretKey = keys.secretKey()
-        let publicKey = keys.publicKey()
-        return NostrPasskeyKeypair(
-            privateKeyHex: secretKey.toHex(),
-            publicKeyHex: publicKey.toHex(),
-            nsec: try secretKey.toBech32(),
-            npub: try publicKey.toBech32()
-        )
+        do {
+            let secretKey = keys.secretKey()
+            let publicKey = keys.publicKey()
+            return NostrPasskeyKeypair(
+                privateKeyHex: secretKey.toHex(),
+                publicKeyHex: publicKey.toHex(),
+                nsec: try secretKey.toBech32(),
+                npub: try publicKey.toBech32()
+            )
+        } catch {
+            throw NostrPasskeyError.keyDerivationFailed("Failed to encode keypair: \(error.localizedDescription)")
+        }
     }
 
     public static func == (lhs: NostrPasskeyKeypair, rhs: NostrPasskeyKeypair) -> Bool {
         lhs.publicKeyHex == rhs.publicKeyHex
+    }
+
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(publicKeyHex)
     }
 }

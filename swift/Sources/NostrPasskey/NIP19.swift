@@ -8,26 +8,42 @@ public enum NIP19 {
 
     /// Encode a hex public key to npub bech32.
     public static func npubEncode(publicKeyHex: String) throws -> String {
-        let pubkey = try PublicKey.parse(publicKey: publicKeyHex)
-        return try pubkey.toBech32()
+        do {
+            let pubkey = try PublicKey.parse(publicKey: publicKeyHex)
+            return try pubkey.toBech32()
+        } catch {
+            throw NostrPasskeyError.invalidKey("Invalid public key hex.")
+        }
     }
 
     /// Encode a hex private key to nsec bech32.
     public static func nsecEncode(privateKeyHex: String) throws -> String {
-        let seckey = try SecretKey.parse(secretKey: privateKeyHex)
-        return try seckey.toBech32()
+        do {
+            let seckey = try SecretKey.parse(secretKey: privateKeyHex)
+            return try seckey.toBech32()
+        } catch {
+            throw NostrPasskeyError.invalidKey("Invalid private key hex.")
+        }
     }
 
     /// Decode an npub bech32 string to hex public key.
     public static func npubDecode(_ npub: String) throws -> String {
-        let pubkey = try PublicKey.parse(publicKey: npub)
-        return pubkey.toHex()
+        do {
+            let pubkey = try PublicKey.parse(publicKey: npub)
+            return pubkey.toHex()
+        } catch {
+            throw NostrPasskeyError.invalidKey("Invalid npub format.")
+        }
     }
 
     /// Decode an nsec bech32 string to hex private key.
     public static func nsecDecode(_ nsec: String) throws -> String {
-        let seckey = try SecretKey.parse(secretKey: nsec)
-        return seckey.toHex()
+        do {
+            let seckey = try SecretKey.parse(secretKey: nsec)
+            return seckey.toHex()
+        } catch {
+            throw NostrPasskeyError.invalidKey("Invalid nsec format.")
+        }
     }
 
     /// Check if a string is a valid npub.
