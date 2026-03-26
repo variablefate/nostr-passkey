@@ -235,6 +235,67 @@ ActivityLogEntry:
   eventPreview: String?   // truncated content for audit
 ```
 
+## Design System — "The Kinetic Beacon"
+
+Shared with RoadFlare. The signer app uses the identical color palette, typography, and component styles.
+
+### Color Palette
+
+| Token | Hex | Usage |
+|-------|-----|-------|
+| `rfPrimary` | `#FF906C` | Primary accent, CTAs, active states |
+| `rfPrimaryContainer` | `#FF784D` | Button backgrounds |
+| `rfPrimaryDim` | `#FF7346` | Gradient endpoints |
+| `rfSurface` | `#0E0E0E` | App background |
+| `rfSurfaceContainerLow` | `#131313` | Input fields |
+| `rfSurfaceContainer` | `#1A1919` | Cards |
+| `rfSurfaceContainerHigh` | `#201F1F` | Elevated cards, secondary buttons |
+| `rfSurfaceContainerHighest` | `#262626` | Disabled states |
+| `rfOnSurface` | `#FFFFFF` | Primary text |
+| `rfOnSurfaceVariant` | `#ADAAAA` | Secondary text |
+| `rfOnline` | `#4ADE80` | Success, approved |
+| `rfOnRide` | `#FBBF24` | Warning, pending |
+| `rfOffline` | `#6B7280` | Disabled, muted |
+| `rfError` | `#FF4444` | Errors, deny |
+
+### Gradients
+
+- **rfFlare**: `rfPrimary → rfPrimaryDim` (135°) — hero CTAs, approve button
+- **rfSurfaceGradient**: `rfSurfaceContainerHigh → rfSurfaceContainer` — elevated cards
+
+### Typography
+
+| Style | Weight | Design | Default Size |
+|-------|--------|--------|-------------|
+| Display | Bold | Rounded | 56pt |
+| Headline | Bold | Rounded | 28pt |
+| Title | Semibold | Default | 20pt |
+| Body | Regular | Default | 16pt |
+| Caption | Medium | Default | 13pt |
+| Mono | Regular | Monospaced | 12pt |
+
+### Components
+
+- **RFPrimaryButtonStyle**: Flare gradient background, black text, 24pt corner radius, press scale
+- **RFSecondaryButtonStyle**: `rfSurfaceContainerHigh` background, `rfPrimary` text
+- **RFGhostButtonStyle**: No background, `rfOnSurfaceVariant` text
+- **rfCard()**: 16pt padding, `rfSurfaceContainer` background, 16pt corner radius
+- **FlareIndicator**: 4pt wide vertical orange bar on leading edge (active/selected states)
+- **StatusDot**: 10pt circle — green (approved/online), yellow (pending), gray (inactive), red (denied)
+
+### Signer-Specific Design Notes
+
+- **Approve button**: Uses `rfFlare` gradient (same as RoadFlare primary CTA)
+- **Deny button**: `rfError` background with white text
+- **App cards**: Horizontal layout with orange `FlareIndicator` on left edge (matching RoadFlare driver cards)
+- **Identity cards**: Similar horizontal layout — passkey icon left, label + npub right
+- **Request approval sheet**: Dark modal with event preview, approve/deny buttons, remember toggle
+- **QR codes**: Orange modules on dark surface (`rfPrimary` on `rfSurfaceContainer`)
+
+### Dark Mode Only
+
+The signer is dark-mode only, matching RoadFlare. No light mode variant.
+
 ## UI Screens
 
 ### Onboarding
