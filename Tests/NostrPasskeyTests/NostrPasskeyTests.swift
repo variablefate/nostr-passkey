@@ -164,6 +164,48 @@ struct DerivationTests {
         let again = try NostrPasskeyManager.deriveKeypair(from: input)
         #expect(again.exportNsec() == keypair.exportNsec())
     }
+
+    @Test("Empty input rejected")
+    func emptyInputRejected() {
+        #expect(throws: NostrPasskeyError.self) {
+            try NostrPasskeyManager.deriveKeypair(from: Data())
+        }
+    }
+}
+
+@Suite("Security Tests")
+struct SecurityTests {
+
+    @Test("print() does not leak private key")
+    func printSafe() throws {
+        let keypair = try NostrPasskeyKeypair.generate()
+        let description = String(describing: keypair)
+        let debugDescription = String(reflecting: keypair)
+        #expect(!description.contains(keypair.exportNsec()))
+        #expect(!debugDescription.contains(keypair.exportNsec()))
+        #expect(description.contains("npub1"))
+        #expect(debugDescription.contains("npub1"))
+    }
+
+    @Test("String interpolation does not leak private key")
+    func interpolationSafe() throws {
+        let keypair = try NostrPasskeyKeypair.generate()
+        let interpolated = "\(keypair)"
+        #expect(!interpolated.contains(keypair.exportNsec()))
+        #expect(interpolated.contains("npub1"))
+    }
+
+    @available(iOS 18.0, *)
+    @Test("Negative index rejected")
+    func negativeIndexRejected() async throws {
+        let manager = await NostrPasskeyManager(relyingPartyID: "test.com")
+        do {
+            _ = try await manager.deriveIndexedKey(index: -1)
+            #expect(Bool(false), "Should have thrown")
+        } catch let error as NostrPasskeyError {
+            #expect(error.errorDescription?.contains("non-negative") == true)
+        }
+    }
 }
 
 @Suite("Passphrase Salt Tests")

@@ -108,6 +108,7 @@ public final class NostrPasskeyManager: NSObject,
     /// Salt: `"nostr-key-{index}"` (e.g., `"nostr-key-0"`, `"nostr-key-1"`)
     @available(iOS 18.0, *)
     public func deriveIndexedKey(index: Int) async throws -> NostrPasskeyKeypair {
+        guard index >= 0 else { throw NostrPasskeyError.invalidKey("Key index must be non-negative.") }
         let salt = Data("nostr-key-\(index)".utf8)
         let prfKey = try await authenticate(salt: salt)
         return try Self.deriveKeypair(from: prfKey)
@@ -118,6 +119,7 @@ public final class NostrPasskeyManager: NSObject,
     /// Use this for first-time registration when you want indexed key support.
     @available(iOS 18.0, *)
     public func createPasskeyAndDeriveIndexedKey(index: Int) async throws -> NostrPasskeyKeypair {
+        guard index >= 0 else { throw NostrPasskeyError.invalidKey("Key index must be non-negative.") }
         let salt = Data("nostr-key-\(index)".utf8)
         let prfKey = try await createPasskey(salt: salt)
         return try Self.deriveKeypair(from: prfKey)
@@ -150,6 +152,9 @@ public final class NostrPasskeyManager: NSObject,
     ///
     /// Algorithm: `SHA-256(inputBytes) → 32-byte secp256k1 private key`
     nonisolated public static func deriveKeypair(from inputBytes: Data) throws -> NostrPasskeyKeypair {
+        guard !inputBytes.isEmpty else {
+            throw NostrPasskeyError.keyDerivationFailed("Cannot derive key from empty input.")
+        }
         let digest = SHA256.hash(data: inputBytes)
         let privateKeyHex = digest.compactMap { String(format: "%02x", $0) }.joined()
         return try NostrPasskeyKeypair.fromHex(privateKeyHex)
@@ -175,6 +180,7 @@ public final class NostrPasskeyManager: NSObject,
 
     @available(iOS 18.0, *)
     private func createPasskey(salt: Data) async throws -> SymmetricKey {
+        guard !isProcessing else { throw NostrPasskeyError.authenticationFailed("A passkey operation is already in progress.") }
         isProcessing = true
         error = nil
         defer { isProcessing = false }
@@ -184,9 +190,13 @@ public final class NostrPasskeyManager: NSObject,
         )
 
         var challengeBytes = [UInt8](repeating: 0, count: 32)
-        _ = SecRandomCopyBytes(kSecRandomDefault, 32, &challengeBytes)
+        guard SecRandomCopyBytes(kSecRandomDefault, 32, &challengeBytes) == errSecSuccess else {
+            throw NostrPasskeyError.keyDerivationFailed("Failed to generate secure random challenge.")
+        }
         var userIdBytes = [UInt8](repeating: 0, count: 16)
-        _ = SecRandomCopyBytes(kSecRandomDefault, 16, &userIdBytes)
+        guard SecRandomCopyBytes(kSecRandomDefault, 16, &userIdBytes) == errSecSuccess else {
+            throw NostrPasskeyError.keyDerivationFailed("Failed to generate secure random user ID.")
+        }
 
         let request = provider.createCredentialRegistrationRequest(
             challenge: Data(challengeBytes),
@@ -213,6 +223,7 @@ public final class NostrPasskeyManager: NSObject,
 
     @available(iOS 18.0, *)
     private func authenticate(salt: Data) async throws -> SymmetricKey {
+        guard !isProcessing else { throw NostrPasskeyError.authenticationFailed("A passkey operation is already in progress.") }
         isProcessing = true
         error = nil
         defer { isProcessing = false }
@@ -222,7 +233,9 @@ public final class NostrPasskeyManager: NSObject,
         )
 
         var challengeBytes = [UInt8](repeating: 0, count: 32)
-        _ = SecRandomCopyBytes(kSecRandomDefault, 32, &challengeBytes)
+        guard SecRandomCopyBytes(kSecRandomDefault, 32, &challengeBytes) == errSecSuccess else {
+            throw NostrPasskeyError.keyDerivationFailed("Failed to generate secure random challenge.")
+        }
 
         let request = provider.createCredentialAssertionRequest(
             challenge: Data(challengeBytes)

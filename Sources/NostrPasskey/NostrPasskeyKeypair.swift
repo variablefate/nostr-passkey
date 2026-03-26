@@ -5,7 +5,7 @@ import NostrSDK
 ///
 /// The private key is intentionally `internal` to discourage accidental logging or display.
 /// Use `exportNsec()` when you explicitly need the private key (e.g., for backup).
-public struct NostrPasskeyKeypair: Sendable, Equatable, Hashable {
+public struct NostrPasskeyKeypair: Sendable, Equatable, Hashable, CustomStringConvertible, CustomDebugStringConvertible {
     /// Public key in hex format (64 characters).
     public let publicKeyHex: String
 
@@ -95,4 +95,10 @@ public struct NostrPasskeyKeypair: Sendable, Equatable, Hashable {
     public func hash(into hasher: inout Hasher) {
         hasher.combine(publicKeyHex)
     }
+
+    /// Safe string representation — only shows npub, never private key material.
+    public var description: String { "NostrPasskeyKeypair(\(npub))" }
+
+    /// Safe debug representation — only shows npub, never private key material.
+    public var debugDescription: String { "NostrPasskeyKeypair(npub: \(npub), hex: \(publicKeyHex))" }
 }
