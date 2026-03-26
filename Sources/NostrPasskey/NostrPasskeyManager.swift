@@ -7,6 +7,14 @@ import UIKit
 
 /// Creates and recovers Nostr identities using passkeys with the WebAuthn PRF extension.
 ///
+/// Supports three derivation modes from a single passkey:
+///
+/// | Mode | Salt | Recovery | Use case |
+/// |------|------|----------|----------|
+/// | **Default** | `"nostr-key-v1"` | Automatic | Single-identity apps |
+/// | **Indexed** | `"nostr-key-{N}"` | Back up the index count | Multiple identities |
+/// | **Passphrase** | `SHA256(SHA256("nostr-key-" + phrase))` | Must know the passphrase | Hidden/2FA identities |
+///
 /// ## How it works
 /// 1. A passkey is created (or authenticated) with a PRF salt
 /// 2. The PRF output is deterministic — same passkey + same salt = same bytes
@@ -22,13 +30,15 @@ import UIKit
 /// ```swift
 /// let manager = NostrPasskeyManager(relyingPartyID: "example.com")
 ///
-/// // Create a new identity
+/// // Single identity (simplest)
 /// let keypair = try await manager.createPasskeyAndDeriveKey()
-/// print(keypair.npub) // npub1...
 ///
-/// // Recover on another device
-/// let recovered = try await manager.authenticateAndDeriveKey()
-/// // recovered.npub == keypair.npub (deterministic)
+/// // Multiple indexed identities
+/// let primary = try await manager.deriveIndexedKey(index: 0)
+/// let alt     = try await manager.deriveIndexedKey(index: 1)
+///
+/// // Hidden passphrase identity (not stored anywhere)
+/// let hidden = try await manager.derivePassphraseKey(passphrase: "my secret")
 /// ```
 @MainActor @Observable
 public final class NostrPasskeyManager: NSObject,
@@ -38,9 +48,9 @@ public final class NostrPasskeyManager: NSObject,
     /// The relying party identifier (your domain, e.g., "example.com").
     public let relyingPartyID: String
 
-    /// The PRF salt used for key derivation. Must be identical across platforms
-    /// for cross-platform key recovery. Default: "nostr-key-v1".
-    public let prfSalt: Data
+    /// The default PRF salt used for single-key derivation.
+    /// Default: "nostr-key-v1". Must be identical across platforms for cross-platform recovery.
+    public let defaultSalt: Data
 
     /// The display name shown in the passkey creation dialog.
     public let credentialName: String
@@ -58,40 +68,82 @@ public final class NostrPasskeyManager: NSObject,
     ///
     /// - Parameters:
     ///   - relyingPartyID: Your domain (must match Associated Domains entitlement).
-    ///   - prfSalt: Salt for PRF key derivation. Default "nostr-key-v1". Must match across platforms.
+    ///   - defaultSalt: Salt for single-key derivation. Default "nostr-key-v1". Must match across platforms.
     ///   - credentialName: Display name in the passkey dialog. Default "Nostr Key".
     public init(
         relyingPartyID: String,
-        prfSalt: String = "nostr-key-v1",
+        defaultSalt: String = "nostr-key-v1",
         credentialName: String = "Nostr Key"
     ) {
         self.relyingPartyID = relyingPartyID
-        self.prfSalt = Data(prfSalt.utf8)
+        self.defaultSalt = Data(defaultSalt.utf8)
         self.credentialName = credentialName
     }
 
-    // MARK: - Public API
+    // MARK: - Public API (Single Key)
 
-    /// Create a new passkey and derive a Nostr keypair from it.
+    /// Create a new passkey and derive a Nostr keypair using the default salt.
     ///
     /// This registers a new passkey with the OS. The passkey syncs via iCloud Keychain.
-    /// The derived Nostr key is deterministic — the same passkey always produces the same key.
     @available(iOS 18.0, *)
     public func createPasskeyAndDeriveKey() async throws -> NostrPasskeyKeypair {
-        let prfKey = try await createPasskey()
-        return try deriveNostrKey(from: prfKey)
+        let prfKey = try await createPasskey(salt: defaultSalt)
+        return try Self.deriveKeypair(from: prfKey)
     }
 
-    /// Authenticate with an existing passkey and derive the Nostr keypair.
-    ///
-    /// Use this for key recovery on a new device. The passkey is available via iCloud Keychain.
+    /// Authenticate with an existing passkey and derive the Nostr keypair using the default salt.
     @available(iOS 18.0, *)
     public func authenticateAndDeriveKey() async throws -> NostrPasskeyKeypair {
-        let prfKey = try await authenticateWithPasskey()
-        return try deriveNostrKey(from: prfKey)
+        let prfKey = try await authenticate(salt: defaultSalt)
+        return try Self.deriveKeypair(from: prfKey)
     }
 
-    /// Derive a Nostr keypair from arbitrary 32+ bytes.
+    // MARK: - Public API (Indexed Keys)
+
+    /// Derive a Nostr keypair at a specific index.
+    ///
+    /// Each index produces a different deterministic key from the same passkey.
+    /// Store the index count in your backup so you know how many keys to recover.
+    ///
+    /// Salt: `"nostr-key-{index}"` (e.g., `"nostr-key-0"`, `"nostr-key-1"`)
+    @available(iOS 18.0, *)
+    public func deriveIndexedKey(index: Int) async throws -> NostrPasskeyKeypair {
+        let salt = Data("nostr-key-\(index)".utf8)
+        let prfKey = try await authenticate(salt: salt)
+        return try Self.deriveKeypair(from: prfKey)
+    }
+
+    /// Create a new passkey and derive the key at a specific index.
+    ///
+    /// Use this for first-time registration when you want indexed key support.
+    @available(iOS 18.0, *)
+    public func createPasskeyAndDeriveIndexedKey(index: Int) async throws -> NostrPasskeyKeypair {
+        let salt = Data("nostr-key-\(index)".utf8)
+        let prfKey = try await createPasskey(salt: salt)
+        return try Self.deriveKeypair(from: prfKey)
+    }
+
+    // MARK: - Public API (Passphrase Keys)
+
+    /// Derive a hidden Nostr keypair protected by a passphrase.
+    ///
+    /// The passphrase is double-SHA256 hashed into the PRF salt, so:
+    /// - The key is deterministic (same passphrase = same key)
+    /// - The key is NOT stored in any backup index
+    /// - An attacker with your passkey but not your passphrase cannot derive this key
+    /// - There is no way to detect that a passphrase key exists
+    ///
+    /// Salt: `SHA256(SHA256("nostr-key-" + passphrase))`
+    @available(iOS 18.0, *)
+    public func derivePassphraseKey(passphrase: String) async throws -> NostrPasskeyKeypair {
+        let salt = Self.passphraseToSalt(passphrase)
+        let prfKey = try await authenticate(salt: salt)
+        return try Self.deriveKeypair(from: prfKey)
+    }
+
+    // MARK: - Key Derivation (Static)
+
+    /// Derive a Nostr keypair from arbitrary bytes.
     ///
     /// This is the core derivation function. Useful for testing, migration, or
     /// integrating with custom PRF implementations.
@@ -103,10 +155,26 @@ public final class NostrPasskeyManager: NSObject,
         return try NostrPasskeyKeypair.fromHex(privateKeyHex)
     }
 
-    // MARK: - Registration
+    /// Derive a Nostr keypair from a SymmetricKey (PRF output).
+    nonisolated static func deriveKeypair(from symmetricKey: SymmetricKey) throws -> NostrPasskeyKeypair {
+        let rawBytes = symmetricKey.withUnsafeBytes { Data($0) }
+        return try deriveKeypair(from: rawBytes)
+    }
+
+    /// Convert a passphrase to a PRF salt using double SHA-256.
+    ///
+    /// Algorithm: `SHA256(SHA256("nostr-key-" + passphrase))`
+    nonisolated public static func passphraseToSalt(_ passphrase: String) -> Data {
+        let input = Data("nostr-key-\(passphrase)".utf8)
+        let firstHash = SHA256.hash(data: input)
+        let secondHash = SHA256.hash(data: Data(firstHash))
+        return Data(secondHash)
+    }
+
+    // MARK: - Registration (Internal)
 
     @available(iOS 18.0, *)
-    private func createPasskey() async throws -> SymmetricKey {
+    private func createPasskey(salt: Data) async throws -> SymmetricKey {
         isProcessing = true
         error = nil
         defer { isProcessing = false }
@@ -127,7 +195,7 @@ public final class NostrPasskeyManager: NSObject,
         )
 
         let inputValues = ASAuthorizationPublicKeyCredentialPRFRegistrationInput.InputValues(
-            saltInput1: prfSalt
+            saltInput1: salt
         )
         request.prf = .inputValues(inputValues)
 
@@ -141,10 +209,10 @@ public final class NostrPasskeyManager: NSObject,
         }
     }
 
-    // MARK: - Assertion
+    // MARK: - Assertion (Internal)
 
     @available(iOS 18.0, *)
-    private func authenticateWithPasskey() async throws -> SymmetricKey {
+    private func authenticate(salt: Data) async throws -> SymmetricKey {
         isProcessing = true
         error = nil
         defer { isProcessing = false }
@@ -161,7 +229,7 @@ public final class NostrPasskeyManager: NSObject,
         )
 
         let inputValues = ASAuthorizationPublicKeyCredentialPRFAssertionInput.InputValues(
-            saltInput1: prfSalt
+            saltInput1: salt
         )
         request.prf = .inputValues(inputValues)
 
@@ -173,13 +241,6 @@ public final class NostrPasskeyManager: NSObject,
             self.assertionContinuation = continuation
             controller.performRequests()
         }
-    }
-
-    // MARK: - Key Derivation (private, uses SymmetricKey from PRF)
-
-    private func deriveNostrKey(from symmetricKey: SymmetricKey) throws -> NostrPasskeyKeypair {
-        let rawBytes = symmetricKey.withUnsafeBytes { Data($0) }
-        return try Self.deriveKeypair(from: rawBytes)
     }
 
     // MARK: - ASAuthorizationControllerDelegate

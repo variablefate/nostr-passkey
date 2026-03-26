@@ -1,5 +1,6 @@
 import Testing
 import Foundation
+import CryptoKit
 @testable import NostrPasskey
 
 @Suite("NostrPasskeyKeypair Tests")
@@ -74,8 +75,9 @@ struct KeypairTests {
 
     @Test("Hashable conformance")
     func hashable() throws {
-        let a = try NostrPasskeyKeypair.fromHex("6b911fd37cdf5c81d4c0adb1ab7fa822ed253ab0ad9aa18d77257c88b29b718e")
-        let b = try NostrPasskeyKeypair.fromHex("6b911fd37cdf5c81d4c0adb1ab7fa822ed253ab0ad9aa18d77257c88b29b718e")
+        let hex = "6b911fd37cdf5c81d4c0adb1ab7fa822ed253ab0ad9aa18d77257c88b29b718e"
+        let a = try NostrPasskeyKeypair.fromHex(hex)
+        let b = try NostrPasskeyKeypair.fromHex(hex)
         var set: Set<NostrPasskeyKeypair> = [a]
         set.insert(b)
         #expect(set.count == 1)
@@ -153,15 +155,70 @@ struct DerivationTests {
         #expect(a.publicKeyHex != b.publicKeyHex)
     }
 
-    @Test("Known SHA-256 derivation vector")
-    func knownVector() throws {
-        // SHA-256("nostr-passkey-test") = known hash → known keypair
+    @Test("Known SHA-256 derivation is stable")
+    func stableDerivation() throws {
         let input = Data("nostr-passkey-test".utf8)
         let keypair = try NostrPasskeyManager.deriveKeypair(from: input)
         #expect(keypair.publicKeyHex.count == 64)
         #expect(keypair.npub.hasPrefix("npub1"))
-        // Derivation is stable — re-running always gives the same result
         let again = try NostrPasskeyManager.deriveKeypair(from: input)
         #expect(again.exportNsec() == keypair.exportNsec())
+    }
+}
+
+@Suite("Passphrase Salt Tests")
+struct PassphraseSaltTests {
+
+    @Test("Same passphrase produces same salt")
+    func deterministicSalt() {
+        let a = NostrPasskeyManager.passphraseToSalt("my secret")
+        let b = NostrPasskeyManager.passphraseToSalt("my secret")
+        #expect(a == b)
+    }
+
+    @Test("Different passphrases produce different salts")
+    func uniqueSalts() {
+        let a = NostrPasskeyManager.passphraseToSalt("phrase one")
+        let b = NostrPasskeyManager.passphraseToSalt("phrase two")
+        #expect(a != b)
+    }
+
+    @Test("Salt is 32 bytes (SHA-256 output)")
+    func saltLength() {
+        let salt = NostrPasskeyManager.passphraseToSalt("test")
+        #expect(salt.count == 32)
+    }
+
+    @Test("Double SHA-256 differs from single SHA-256")
+    func doubleHashDiffers() {
+        let input = Data("nostr-key-test".utf8)
+        let singleHash = Data(SHA256.hash(data: input))
+        let salt = NostrPasskeyManager.passphraseToSalt("test")
+        #expect(salt != singleHash)
+    }
+
+    @Test("Empty passphrase still works")
+    func emptyPassphrase() {
+        let salt = NostrPasskeyManager.passphraseToSalt("")
+        #expect(salt.count == 32)
+    }
+
+    @Test("Passphrase salt produces valid keypair via derivation")
+    func passphraseToKeypair() throws {
+        let salt = NostrPasskeyManager.passphraseToSalt("hidden identity")
+        let keypair = try NostrPasskeyManager.deriveKeypair(from: salt)
+        #expect(keypair.npub.hasPrefix("npub1"))
+        let salt2 = NostrPasskeyManager.passphraseToSalt("hidden identity")
+        let keypair2 = try NostrPasskeyManager.deriveKeypair(from: salt2)
+        #expect(keypair.publicKeyHex == keypair2.publicKeyHex)
+    }
+
+    @Test("Indexed salts differ from passphrase salts")
+    func indexedVsPassphrase() throws {
+        let indexedKey = try NostrPasskeyManager.deriveKeypair(from: Data("nostr-key-0".utf8))
+        let passphraseKey = try NostrPasskeyManager.deriveKeypair(
+            from: NostrPasskeyManager.passphraseToSalt("0")
+        )
+        #expect(indexedKey.publicKeyHex != passphraseKey.publicKeyHex)
     }
 }
