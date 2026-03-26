@@ -165,6 +165,20 @@ struct DerivationTests {
         #expect(again.exportNsec() == keypair.exportNsec())
     }
 
+    // Cross-platform test vector: any implementation following the spec MUST produce these exact outputs.
+    // Input: UTF-8 bytes of "nostr-passkey-cross-platform-vector-1"
+    // Step 1: SHA-256 → 7175cb08fa116efeb7d07fd686c704f3b88cb7444a510126941b23c8c89172c1 (private key)
+    // Step 2: secp256k1 → c02c731e3397fbb4358a496bcb0400af82dc31d3474ca00a8dd2bd03b95ee3b3 (public key)
+    // Step 3: NIP-19 → npub1cqk8x83njlamgdv2f94ukpqq47pdcvwngax2qz5d627s8w27uwesvug0ra
+    // Kotlin/Android MUST produce identical outputs to guarantee cross-platform key recovery.
+    @Test("Cross-platform test vector")
+    func crossPlatformVector() throws {
+        let input = Data("nostr-passkey-cross-platform-vector-1".utf8)
+        let keypair = try NostrPasskeyManager.deriveKeypair(from: input)
+        #expect(keypair.publicKeyHex == "c02c731e3397fbb4358a496bcb0400af82dc31d3474ca00a8dd2bd03b95ee3b3")
+        #expect(keypair.npub == "npub1cqk8x83njlamgdv2f94ukpqq47pdcvwngax2qz5d627s8w27uwesvug0ra")
+    }
+
     @Test("Empty input rejected")
     func emptyInputRejected() {
         #expect(throws: NostrPasskeyError.self) {
